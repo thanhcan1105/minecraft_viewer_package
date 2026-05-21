@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class MinecraftViewer extends StatefulWidget {
-  final Map<String, dynamic> entityJson;
-  final String? textureUrl;
+  final String entityJson;
+  final String? textureBase64;
   final double scale;
   final double cameraDistance;
   final double rotationSpeed;
@@ -20,7 +20,7 @@ class MinecraftViewer extends StatefulWidget {
   const MinecraftViewer({
     super.key,
     required this.entityJson,
-    this.textureUrl,
+    this.textureBase64,
     this.scale = 1.0,
     this.cameraDistance = 80.0,
     this.rotationSpeed = 0.005,
@@ -87,8 +87,9 @@ class MinecraftViewerState extends State<MinecraftViewer> {
 
   Future<void> _loadModel() async {
     try {
+      final entityMap = jsonDecode(widget.entityJson) as Map<String, dynamic>;
       final options = <String, dynamic>{
-        'entityJson': widget.entityJson,
+        'entityJson': entityMap,
         'scale': widget.scale,
         'cameraDistance': widget.cameraDistance,
         'rotationSpeed': widget.rotationSpeed,
@@ -96,7 +97,8 @@ class MinecraftViewerState extends State<MinecraftViewer> {
         'backgroundColor': widget.backgroundColor,
         'lighting': widget.lighting,
         'fov': widget.fov,
-        if (widget.textureUrl != null) 'textureUrl': widget.textureUrl,
+        if (widget.textureBase64 != null)
+          'textureUrl': 'data:image/png;base64,${widget.textureBase64}',
       };
       await _controller
           .runJavaScript('window.loadModel(${jsonEncode(options)});');
@@ -107,13 +109,14 @@ class MinecraftViewerState extends State<MinecraftViewer> {
 
   // Public control methods — access via GlobalKey<MinecraftViewerState>
 
-  void updateModel(Map<String, dynamic> newEntityJson) {
-    _controller.runJavaScript(
-        'window.updateModel(${jsonEncode(newEntityJson)});');
+  void updateModel(String entityJson) {
+    final entityMap = jsonDecode(entityJson) as Map<String, dynamic>;
+    _controller.runJavaScript('window.updateModel(${jsonEncode(entityMap)});');
   }
 
-  void updateTexture(String url) {
-    _controller.runJavaScript('window.updateTexture(${jsonEncode(url)});');
+  void updateTexture(String base64) {
+    final dataUri = 'data:image/png;base64,$base64';
+    _controller.runJavaScript('window.updateTexture(${jsonEncode(dataUri)});');
   }
 
   void setScale(double scale) {
