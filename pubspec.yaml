@@ -1,0 +1,23 @@
+name: minecraft_viewer
+description: Cross-platform Flutter package for viewing and rendering Minecraft 3D entity models using Three.js and WebView. Supports iOS, Android, and Web platforms with interactive controls (drag, zoom, auto-rotate).
+version: 1.0.0
+homepage: https://github.com/thanhcan1105/minecraft_viewer_package
+repository: https://github.com/thanhcan1105/minecraft_viewer_package
+issue_tracker: https://github.com/thanhcan1105/minecraft_viewer_package/issues
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.10.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  webview_flutter: ^4.4.0
+  webview_flutter_android: ^4.0.0
+  webview_flutter_wkwebview: ^3.0.0
+  webview_flutter_web: ^0.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
