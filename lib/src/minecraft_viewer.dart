@@ -171,6 +171,7 @@ class MinecraftModelViewer {
     this.autoRotate = options.autoRotate !== false;
     this.rotationSpeed = options.rotationSpeed || 0.005;
     this.currentEntityJson = options.entityJson || null;
+    this._rafId = null;
   }
 
   async init() {
@@ -181,7 +182,7 @@ class MinecraftModelViewer {
     this.setupControls();
     if (this.options.textureUrl) await this.loadTexture(this.options.textureUrl);
     if (this.currentEntityJson) this.buildModel(this.currentEntityJson);
-    this.animate();
+    this._scheduleFrame();
     window.addEventListener('resize', () => this.onWindowResize());
   }
 
@@ -236,6 +237,7 @@ class MinecraftModelViewer {
     el.addEventListener('mousedown', (e) => {
       this.isDragging = true;
       this.prevPos = { x: e.clientX, y: e.clientY };
+      this._scheduleFrame();
     });
     document.addEventListener('mouseup', () => { this.isDragging = false; });
     document.addEventListener('mousemove', (e) => {
@@ -245,6 +247,7 @@ class MinecraftModelViewer {
       this.model.rotation.y += dx * 0.01;
       this.model.rotation.x += dy * 0.01;
       this.prevPos = { x: e.clientX, y: e.clientY };
+      this._scheduleFrame();
     });
 
     el.addEventListener('touchstart', (e) => {
@@ -253,6 +256,7 @@ class MinecraftModelViewer {
         this.isDragging = true;
         this.prevPinchDist = null;
         this.prevPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        this._scheduleFrame();
       } else if (e.touches.length === 2) {
         this.isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -274,6 +278,7 @@ class MinecraftModelViewer {
         this.model.rotation.y += dx * 0.01;
         this.model.rotation.x += dy * 0.01;
         this.prevPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        this._scheduleFrame();
       } else if (e.touches.length === 2) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -281,6 +286,7 @@ class MinecraftModelViewer {
         if (this.prevPinchDist !== null) {
           const delta = (this.prevPinchDist - dist) * 0.05;
           this.camera.position.z = Math.max(0.5, Math.min(20, this.camera.position.z + delta));
+          this._scheduleFrame();
         }
         this.prevPinchDist = dist;
       }
@@ -290,6 +296,7 @@ class MinecraftModelViewer {
       e.preventDefault();
       this.camera.position.z += e.deltaY * 0.005;
       this.camera.position.z = Math.max(0.5, Math.min(20, this.camera.position.z));
+      this._scheduleFrame();
     }, { passive: false });
   }
 
@@ -480,12 +487,18 @@ class MinecraftModelViewer {
     });
   }
 
+  _scheduleFrame() {
+    if (this._rafId) return;
+    this._rafId = requestAnimationFrame(() => this.animate());
+  }
+
   animate() {
-    requestAnimationFrame(() => this.animate());
+    this._rafId = null;
     if (this.autoRotate && !this.isDragging && this.model) {
       this.model.rotation.y += this.rotationSpeed;
     }
     this.renderer.render(this.scene, this.camera);
+    if (this.autoRotate) this._scheduleFrame();
   }
 
   onWindowResize() {
@@ -494,17 +507,19 @@ class MinecraftModelViewer {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this._scheduleFrame();
   }
 
-  updateModel(json)  { this.buildModel(json); }
+  updateModel(json)  { this.buildModel(json); this._scheduleFrame(); }
   updateTexture(url) {
     this.loadTexture(url).then(() => {
       if (this.currentEntityJson) this.buildModel(this.currentEntityJson);
+      this._scheduleFrame();
     });
   }
-  setScale(v)            { if (this.model) this.model.scale.set(v, v, v); this.options.scale = v; }
-  setCameraDistance(d)   { this.camera.position.z = d / 16; }
-  setAutoRotate(v)       { this.autoRotate = v; }
+  setScale(v)            { if (this.model) this.model.scale.set(v, v, v); this.options.scale = v; this._scheduleFrame(); }
+  setCameraDistance(d)   { this.camera.position.z = d / 16; this._scheduleFrame(); }
+  setAutoRotate(v)       { this.autoRotate = v; if (v) this._scheduleFrame(); }
 }
 
 // ─── global API ───────────────────────────────────────────────────────────────
