@@ -6,7 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 class MinecraftViewer extends StatefulWidget {
   final String entityJson;
   final String? textureBase64;
-  final double scale;
+  final double? scale;
   final double cameraDistance;
   final double rotationSpeed;
   final bool autoRotate;
@@ -21,7 +21,7 @@ class MinecraftViewer extends StatefulWidget {
     super.key,
     required this.entityJson,
     this.textureBase64,
-    this.scale = 1.0,
+    this.scale,
     this.cameraDistance = 80.0,
     this.rotationSpeed = 0.005,
     this.autoRotate = true,
@@ -90,7 +90,7 @@ class MinecraftViewerState extends State<MinecraftViewer> {
       final entityMap = jsonDecode(widget.entityJson) as Map<String, dynamic>;
       final options = <String, dynamic>{
         'entityJson': entityMap,
-        'scale': widget.scale,
+        if (widget.scale != null) 'scale': widget.scale,
         'cameraDistance': widget.cameraDistance,
         'rotationSpeed': widget.rotationSpeed,
         'autoRotate': widget.autoRotate,
@@ -359,8 +359,28 @@ class MinecraftModelViewer {
     }
 
     this._centerModel();
-    const s = this.options.scale || 1.0;
-    this.model.scale.set(s, s, s);
+
+    const s = this.options.scale;
+    if (s) {
+      this.model.scale.set(s, s, s);
+    } else {
+      const box = new THREE.Box3().setFromObject(this.model);
+      const modelH = box.max.y - box.min.y;
+      if (modelH > 0.0001) {
+        const fovRad = (this.options.fov || 75) * Math.PI / 180;
+        const visH = 2 * this.camera.position.z * Math.tan(fovRad / 2);
+        const autoS = (visH * 0.8) / modelH;
+        this.model.scale.set(autoS, autoS, autoS);
+      }
+    }
+
+    // Reset camera to center on every model load
+    this.panTargetX = 0;
+    this.panTargetY = 0;
+    this.camera.position.x = 0;
+    this.camera.position.y = 0;
+    this.camera.lookAt(0, 0, 0);
+
     this.scene.add(this.model);
   }
 
@@ -630,7 +650,7 @@ class MinecraftModelViewer {
       this._dirty = true;
     });
   }
-  setScale(v)          { if (this.model) this.model.scale.set(v, v, v); this.options.scale = v; this._dirty = true; }
+  setScale(v)          { if (this.model) { this.model.scale.set(v, v, v); } this.options.scale = v; this._dirty = true; }
   setCameraDistance(d) { this.camera.position.z = d / 16; this._dirty = true; }
   setAutoRotate(v)     { this.autoRotate = v; this._dirty = true; }
 }
