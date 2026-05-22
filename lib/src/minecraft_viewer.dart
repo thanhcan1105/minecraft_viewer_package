@@ -1,7 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+
+import '_viewer_controller_stub.dart'
+    if (dart.library.html) '_viewer_controller_web.dart'
+    if (dart.library.io) '_viewer_controller_mobile.dart';
 
 class MinecraftViewer extends StatefulWidget {
   final String entityJson;
@@ -38,35 +41,28 @@ class MinecraftViewer extends StatefulWidget {
 }
 
 class MinecraftViewerState extends State<MinecraftViewer> {
-  late WebViewController _controller;
+  late ViewerController _controller;
   bool _isLoading = true;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _initWebView();
+    _controller = ViewerController();
+    _controller.init(_getHtmlContent(), _handleJavaScriptMessage);
   }
 
-  void _initWebView() {
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..addJavaScriptChannel(
-        'MinecraftViewerBridge',
-        onMessageReceived: (message) =>
-            _handleJavaScriptMessage(message.message),
-      )
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageFinished: (_) => _loadModel(),
-        onWebResourceError: (error) =>
-            _handleError('WebView error: ${error.description}'),
-      ))
-      ..loadHtmlString(_getHtmlContent());
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   void _handleJavaScriptMessage(String message) {
     if (widget.debugMode) debugPrint('MinecraftViewer JS: $message');
-    if (message == 'MODEL_LOADED') {
+    if (message == 'PAGE_READY') {
+      _loadModel();
+    } else if (message == 'MODEL_LOADED') {
       if (mounted) setState(() => _isLoading = false);
       widget.onModelLoaded?.call();
     } else if (message.startsWith('ERROR:')) {
@@ -86,6 +82,7 @@ class MinecraftViewerState extends State<MinecraftViewer> {
   }
 
   Future<void> _loadModel() async {
+    if (widget.entityJson.isEmpty) return;
     try {
       final entityMap = jsonDecode(widget.entityJson) as Map<String, dynamic>;
       final options = <String, dynamic>{
@@ -100,8 +97,7 @@ class MinecraftViewerState extends State<MinecraftViewer> {
         if (widget.textureBase64 != null)
           'textureUrl': 'data:image/png;base64,${widget.textureBase64}',
       };
-      await _controller
-          .runJavaScript('window.loadModel(${jsonEncode(options)});');
+      await _controller.runJS('window.loadModel(${jsonEncode(options)});');
     } catch (e) {
       _handleError(e.toString());
     }
@@ -110,26 +106,23 @@ class MinecraftViewerState extends State<MinecraftViewer> {
   // Public control methods — access via GlobalKey<MinecraftViewerState>
 
   void updateModel(String entityJson) {
+    if (entityJson.isEmpty) return;
     final entityMap = jsonDecode(entityJson) as Map<String, dynamic>;
-    _controller.runJavaScript('window.updateModel(${jsonEncode(entityMap)});');
+    _controller.runJS('window.updateModel(${jsonEncode(entityMap)});');
   }
 
   void updateTexture(String base64) {
     final dataUri = 'data:image/png;base64,$base64';
-    _controller.runJavaScript('window.updateTexture(${jsonEncode(dataUri)});');
+    _controller.runJS('window.updateTexture(${jsonEncode(dataUri)});');
   }
 
-  void setScale(double scale) {
-    _controller.runJavaScript('window.setScale($scale);');
-  }
+  void setScale(double scale) => _controller.runJS('window.setScale($scale);');
 
-  void setCameraDistance(double distance) {
-    _controller.runJavaScript('window.setCameraDistance($distance);');
-  }
+  void setCameraDistance(double distance) =>
+      _controller.runJS('window.setCameraDistance($distance);');
 
-  void setAutoRotate(bool autoRotate) {
-    _controller.runJavaScript('window.setAutoRotate($autoRotate);');
-  }
+  void setAutoRotate(bool autoRotate) =>
+      _controller.runJS('window.setAutoRotate($autoRotate);');
 
   String _getHtmlContent() {
     final bgCss =
@@ -156,6 +149,25 @@ ${_getJavaScriptContent()}
   }
 
   String _getJavaScriptContent() => r'''
+// Web iframe bridge — used when running inside Flutter Web (iframe context).
+// On native mobile, MinecraftViewerBridge is injected by addJavaScriptChannel
+// before this script runs, so the if-guard skips re-defining it.
+if (typeof window.MinecraftViewerBridge === 'undefined') {
+  window.MinecraftViewerBridge = {
+    postMessage: function(msg) {
+      try { window.parent.postMessage({source:'mc-viewer', data:msg}, '*'); } catch(e) {}
+    }
+  };
+}
+// Handle runJS commands sent from Flutter Web via postMessage
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.source === 'mc-eval') {
+    try { eval(e.data.code); } catch(err) {
+      window.MinecraftViewerBridge.postMessage('ERROR:eval:' + err.message);
+    }
+  }
+});
+
 class MinecraftModelViewer {
   constructor(container, options) {
     this.container = container;
@@ -684,7 +696,7 @@ window.setAutoRotate      = v    => { if (_viewer) _viewer.setAutoRotate(v); };
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        WebViewWidget(controller: _controller),
+        _controller.buildWidget(),
         if (_isLoading)
           const Center(
             child: CircularProgressIndicator(color: Colors.white),
