@@ -327,6 +327,8 @@ class MinecraftModelViewer {
 
     if (entityJson['minecraft:geometry']) {
       this._buildBedrockModel(entityJson);
+    } else if (Object.keys(entityJson).some(k => k.startsWith('geometry.'))) {
+      this._buildLegacyBedrockModel(entityJson);
     } else {
       const elements = entityJson.elements || [];
       elements.forEach(el => this._addCube(el));
@@ -370,6 +372,81 @@ class MinecraftModelViewer {
       (origin[2] + size[2] / 2) / 16
     );
     this.model.add(mesh);
+  }
+
+  _buildLegacyBedrockModel(entityJson) {
+    const geoKey = Object.keys(entityJson).find(k => k.startsWith('geometry.'));
+    if (!geoKey) return;
+    const geo = entityJson[geoKey];
+    const texW = geo.texturewidth || 64;
+    const texH = geo.textureheight || 64;
+    (geo.bones || []).forEach(bone => {
+      const mirror = bone.mirror || false;
+      (bone.cubes || []).forEach(cube => this._addLegacyBedrockCube(cube, texW, texH, mirror));
+    });
+  }
+
+  _addLegacyBedrockCube(cube, texW, texH, mirror) {
+    const origin  = cube.origin  || [0, 0, 0];
+    const size    = cube.size    || [1, 1, 1];
+    const inflate = cube.inflate || 0;
+    const fw = size[0] + inflate * 2;
+    const fh = size[1] + inflate * 2;
+    const fd = size[2] + inflate * 2;
+    if (fw < 0.001 || fh < 0.001 || fd < 0.001) return;
+
+    const geometry = new THREE.BoxGeometry(fw / 16, fh / 16, fd / 16);
+    const material = (this.texture && Array.isArray(cube.uv) && cube.uv.length === 2)
+      ? this._boxUVMaterials(cube.uv, size, texW, texH, mirror)
+      : new THREE.MeshPhongMaterial({ color: 0x7EC850, shininess: 0 });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.position.set(
+      (origin[0] + size[0] / 2) / 16,
+      (origin[1] + size[1] / 2) / 16,
+      (origin[2] + size[2] / 2) / 16
+    );
+    this.model.add(mesh);
+  }
+
+  _boxUVMaterials(uv, size, texW, texH, mirror) {
+    // Box UV layout for cube [w, h, d] at [u0, v0]:
+    // Three.js face order: east(+x), west(-x), up(+y), down(-y), south(+z), north(-z)
+    const u0 = uv[0], v0 = uv[1];
+    const w = size[0], h = size[1], d = size[2];
+
+    // [x1, y1, x2, y2, flipU]
+    const faces = mirror ? [
+      [u0+d+w,     v0+d, u0+d+w+d,   v0+d+h, true ],  // east  → west UV, flipped
+      [u0,         v0+d, u0+d,        v0+d+h, true ],  // west  → east UV, flipped
+      [u0+d,       v0,   u0+d+w,      v0+d,   true ],  // up,   flipped
+      [u0+d+w,     v0,   u0+d+w+w,   v0+d,   true ],  // down, flipped
+      [u0+d+w+d,   v0+d, u0+d+w+d+w, v0+d+h, true ],  // south,flipped
+      [u0+d,       v0+d, u0+d+w,      v0+d+h, true ],  // north,flipped
+    ] : [
+      [u0+d+w,     v0+d, u0+d+w+d,   v0+d+h, false],  // east
+      [u0,         v0+d, u0+d,        v0+d+h, false],  // west
+      [u0+d,       v0,   u0+d+w,      v0+d,   false],  // up
+      [u0+d+w,     v0,   u0+d+w+w,   v0+d,   false],  // down
+      [u0+d+w+d,   v0+d, u0+d+w+d+w, v0+d+h, false],  // south
+      [u0+d,       v0+d, u0+d+w,      v0+d+h, false],  // north
+    ];
+
+    return faces.map(([x1, y1, x2, y2, fu]) => {
+      const tex = this.texture.clone();
+      tex.needsUpdate = true;
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      const u1 = x1/texW, u2 = x2/texW;
+      let v1 = y1/texH,   v2 = y2/texH;
+      const flipV = v2 < v1;
+      if (flipV) { [v1, v2] = [v2, v1]; }
+      tex.offset.set(fu ? u2 : u1, 1 - v2);
+      tex.repeat.set(fu ? -(u2-u1) : (u2-u1), flipV ? -(v2-v1) : (v2-v1));
+      return new THREE.MeshPhongMaterial({ map: tex, shininess: 0, transparent: true, alphaTest: 0.1 });
+    });
   }
 
   _bedrockFaceMaterials(faces, texW, texH) {
