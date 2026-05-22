@@ -172,6 +172,10 @@ class MinecraftModelViewer {
     this.rotationSpeed = options.rotationSpeed || 0.005;
     this.currentEntityJson = options.entityJson || null;
     this._dirty = true;
+    this.isPanning = false;
+    this.prevMidPoint = null;
+    this.panTargetX = 0;
+    this.panTargetY = 0;
   }
 
   async init() {
@@ -234,17 +238,25 @@ class MinecraftModelViewer {
   setupControls() {
     const el = this.renderer.domElement;
 
+    el.addEventListener('contextmenu', e => e.preventDefault());
     el.addEventListener('mousedown', (e) => {
-      this.isDragging = true;
+      if (e.button === 1 || e.button === 2) {
+        this.isPanning = true;
+      } else {
+        this.isDragging = true;
+      }
       this.prevPos = { x: e.clientX, y: e.clientY };
     });
-    document.addEventListener('mouseup', () => { this.isDragging = false; });
+    document.addEventListener('mouseup', () => { this.isDragging = false; this.isPanning = false; });
     document.addEventListener('mousemove', (e) => {
-      if (!this.isDragging || !this.model) return;
       const dx = e.clientX - this.prevPos.x;
       const dy = e.clientY - this.prevPos.y;
-      this.model.rotation.y += dx * 0.01;
-      this.model.rotation.x += dy * 0.01;
+      if (this.isPanning) {
+        this._applyPan(dx, dy);
+      } else if (this.isDragging && this.model) {
+        this.model.rotation.y += dx * 0.01;
+        this.model.rotation.x += dy * 0.01;
+      } else { return; }
       this.prevPos = { x: e.clientX, y: e.clientY };
       this._dirty = true;
     });
@@ -254,18 +266,23 @@ class MinecraftModelViewer {
       if (e.touches.length === 1) {
         this.isDragging = true;
         this.prevPinchDist = null;
+        this.prevMidPoint = null;
         this.prevPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       } else if (e.touches.length === 2) {
         this.isDragging = false;
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         this.prevPinchDist = Math.sqrt(dx * dx + dy * dy);
+        this.prevMidPoint = {
+          x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+          y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+        };
       }
     }, { passive: false });
 
     el.addEventListener('touchend', (e) => {
       e.preventDefault();
-      if (e.touches.length === 0) { this.isDragging = false; this.prevPinchDist = null; }
+      if (e.touches.length === 0) { this.isDragging = false; this.prevPinchDist = null; this.prevMidPoint = null; }
     }, { passive: false });
 
     el.addEventListener('touchmove', (e) => {
@@ -287,6 +304,13 @@ class MinecraftModelViewer {
           this._dirty = true;
         }
         this.prevPinchDist = dist;
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        if (this.prevMidPoint !== null) {
+          this._applyPan(midX - this.prevMidPoint.x, midY - this.prevMidPoint.y);
+          this._dirty = true;
+        }
+        this.prevMidPoint = { x: midX, y: midY };
       }
     }, { passive: false });
 
@@ -548,6 +572,15 @@ class MinecraftModelViewer {
 
     pivot.add(mesh);
     return pivot;
+  }
+
+  _applyPan(dx, dy) {
+    const speed = this.camera.position.z * 0.002;
+    this.panTargetX -= dx * speed;
+    this.panTargetY += dy * speed;
+    this.camera.position.x = this.panTargetX;
+    this.camera.position.y = this.panTargetY;
+    this.camera.lookAt(this.panTargetX, this.panTargetY, 0);
   }
 
   _centerModel() {
