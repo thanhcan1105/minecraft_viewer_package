@@ -412,29 +412,33 @@ class MinecraftModelViewer {
   }
 
   _boxUVMaterials(uv, size, texW, texH, mirror) {
-    // Box UV layout for cube [w, h, d] at [u0, v0]:
-    // Three.js face order: east(+x), west(-x), up(+y), down(-y), south(+z), north(-z)
+    // Box UV net layout for cube [w, h, d] at [u0, v0]:
+    //   Row 0: [TOP:d×w at (u0+d,v0)] [BOT:w×d at (u0+d+w,v0)]
+    //   Row 1: [W:d×h] [N:w×h] [E:d×h] [S:w×h]
+    // Three.js BoxGeometry face order: +x(east), -x(west), +y(up), -y(down), +z(south), -z(north)
     const u0 = uv[0], v0 = uv[1];
     const w = size[0], h = size[1], d = size[2];
 
-    // [x1, y1, x2, y2, flipU]
-    const faces = mirror ? [
-      [u0+d+w,     v0+d, u0+d+w+d,   v0+d+h, true ],  // east  → west UV, flipped
-      [u0,         v0+d, u0+d,        v0+d+h, true ],  // west  → east UV, flipped
-      [u0+d,       v0,   u0+d+w,      v0+d,   true ],  // up,   flipped
-      [u0+d+w,     v0,   u0+d+w+w,   v0+d,   true ],  // down, flipped
-      [u0+d+w+d,   v0+d, u0+d+w+d+w, v0+d+h, true ],  // south,flipped
-      [u0+d,       v0+d, u0+d+w,      v0+d+h, true ],  // north,flipped
+    // [x1, y1, x2, y2, flipU]  — UV region in texture pixels
+    // East/West/North faces need horizontal flip due to Three.js UV orientation
+    const r = mirror ? [
+      [u0,         v0+d, u0+d,        v0+d+h, false],  // east  → W region (swapped), no extra flip
+      [u0+d+w,     v0+d, u0+d+w+d,   v0+d+h, false],  // west  → E region (swapped), no extra flip
+      [u0+d,       v0,   u0+d+w,      v0+d,   true ],  // up,   mirror adds flip
+      [u0+d+w,     v0,   u0+d+w+w,   v0+d,   true ],  // down, mirror adds flip
+      [u0+d+w+d,   v0+d, u0+d+w+d+w, v0+d+h, true ],  // south,mirror adds flip
+      [u0+d,       v0+d, u0+d+w,      v0+d+h, false],  // north,flip cancels
     ] : [
-      [u0+d+w,     v0+d, u0+d+w+d,   v0+d+h, false],  // east
-      [u0,         v0+d, u0+d,        v0+d+h, false],  // west
+      [u0+d+w,     v0+d, u0+d+w+d,   v0+d+h, true ],  // east  (Three.js UV reversed)
+      [u0,         v0+d, u0+d,        v0+d+h, true ],  // west  (Three.js UV reversed)
       [u0+d,       v0,   u0+d+w,      v0+d,   false],  // up
       [u0+d+w,     v0,   u0+d+w+w,   v0+d,   false],  // down
       [u0+d+w+d,   v0+d, u0+d+w+d+w, v0+d+h, false],  // south
-      [u0+d,       v0+d, u0+d+w,      v0+d+h, false],  // north
+      [u0+d,       v0+d, u0+d+w,      v0+d+h, true ],  // north (Three.js UV reversed)
     ];
 
-    return faces.map(([x1, y1, x2, y2, fu]) => {
+    return r.map(function(face) {
+      const x1 = face[0], y1 = face[1], x2 = face[2], y2 = face[3], fu = face[4];
       const tex = this.texture.clone();
       tex.needsUpdate = true;
       tex.wrapS = THREE.ClampToEdgeWrapping;
@@ -442,11 +446,11 @@ class MinecraftModelViewer {
       const u1 = x1/texW, u2 = x2/texW;
       let v1 = y1/texH,   v2 = y2/texH;
       const flipV = v2 < v1;
-      if (flipV) { [v1, v2] = [v2, v1]; }
+      if (flipV) { const tmp = v1; v1 = v2; v2 = tmp; }
       tex.offset.set(fu ? u2 : u1, 1 - v2);
       tex.repeat.set(fu ? -(u2-u1) : (u2-u1), flipV ? -(v2-v1) : (v2-v1));
       return new THREE.MeshPhongMaterial({ map: tex, shininess: 0, transparent: true, alphaTest: 0.1 });
-    });
+    }.bind(this));
   }
 
   _bedrockFaceMaterials(faces, texW, texH) {
@@ -570,7 +574,11 @@ class MinecraftModelViewer {
     }
     if (!this._dirty) return;
     this._dirty = false;
-    this.renderer.render(this.scene, this.camera);
+    try {
+      this.renderer.render(this.scene, this.camera);
+    } catch(e) {
+      if (window.MinecraftViewerBridge) window.MinecraftViewerBridge.postMessage('ERROR:render:' + e.message);
+    }
   }
 
   onWindowResize() {
