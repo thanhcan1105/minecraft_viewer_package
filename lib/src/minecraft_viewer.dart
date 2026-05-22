@@ -320,8 +320,12 @@ class MinecraftModelViewer {
     this.currentEntityJson = entityJson;
     this.model = new THREE.Group();
 
-    const elements = entityJson.elements || [];
-    elements.forEach(el => this._addCube(el));
+    if (entityJson['minecraft:geometry']) {
+      this._buildBedrockModel(entityJson);
+    } else {
+      const elements = entityJson.elements || [];
+      elements.forEach(el => this._addCube(el));
+    }
 
     this._centerModel();
     const s = this.options.scale || 1.0;
@@ -329,10 +333,68 @@ class MinecraftModelViewer {
     this.scene.add(this.model);
   }
 
+  _buildBedrockModel(entityJson) {
+    const geoList = entityJson['minecraft:geometry'];
+    if (!geoList || !geoList.length) return;
+    const geo = geoList[0];
+    const desc = geo.description || {};
+    const texW = desc.texture_width || 64;
+    const texH = desc.texture_height || 64;
+    (geo.bones || []).forEach(bone => {
+      (bone.cubes || []).forEach(cube => this._addBedrockCube(cube, texW, texH));
+    });
+  }
+
+  _addBedrockCube(cube, texW, texH) {
+    const origin = cube.origin || [0, 0, 0];
+    const size   = cube.size   || [1, 1, 1];
+    const w = size[0] / 16, h = size[1] / 16, d = size[2] / 16;
+    if (Math.abs(w) < 0.001 || Math.abs(h) < 0.001 || Math.abs(d) < 0.001) return;
+
+    const geometry = new THREE.BoxGeometry(Math.abs(w), Math.abs(h), Math.abs(d));
+    const material = (this.texture && cube.uv)
+      ? this._bedrockFaceMaterials(cube.uv, texW, texH)
+      : new THREE.MeshPhongMaterial({ color: 0x7EC850, shininess: 0 });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.position.set(
+      (origin[0] + size[0] / 2) / 16,
+      (origin[1] + size[1] / 2) / 16,
+      (origin[2] + size[2] / 2) / 16
+    );
+    this.model.add(mesh);
+  }
+
+  _bedrockFaceMaterials(faces, texW, texH) {
+    // Three.js BoxGeometry face order: +x, -x, +y, -y, +z, -z
+    // Minecraft Bedrock equivalents:  east,west, up,down,south,north
+    const order = ['east', 'west', 'up', 'down', 'south', 'north'];
+    return order.map(name => {
+      const face = faces[name];
+      if (!face) return new THREE.MeshPhongMaterial({ color: 0x888888, shininess: 0 });
+      const tex = this.texture.clone();
+      tex.needsUpdate = true;
+      const uv = face.uv || [0, 0];
+      const uvSize = face.uv_size || [16, 16];
+      const flipU = uvSize[0] < 0;
+      const flipV = uvSize[1] < 0;
+      const uw = Math.abs(uvSize[0]) / texW;
+      const uh = Math.abs(uvSize[1]) / texH;
+      const u0 = uv[0] / texW;
+      const v0 = uv[1] / texH;
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.offset.set(flipU ? u0 + uw : u0, flipV ? 1 - v0 : 1 - v0 - uh);
+      tex.repeat.set(flipU ? -uw : uw, flipV ? -uh : uh);
+      return new THREE.MeshPhongMaterial({ map: tex, shininess: 0, transparent: true, alphaTest: 0.1 });
+    });
+  }
+
   _addCube(element) {
     const from = element.from || [0, 0, 0];
     const to   = element.to   || [16, 16, 16];
-
     const w = (to[0] - from[0]) / 16;
     const h = (to[1] - from[1]) / 16;
     const d = (to[2] - from[2]) / 16;
@@ -340,7 +402,7 @@ class MinecraftModelViewer {
 
     const geometry = new THREE.BoxGeometry(w, h, d);
     const material = (this.texture && element.faces)
-      ? this._faceMaterials(element.faces)
+      ? this._javaFaceMaterials(element.faces)
       : new THREE.MeshPhongMaterial({ color: 0x7EC850, shininess: 0 });
 
     const mesh = new THREE.Mesh(geometry, material);
@@ -351,7 +413,6 @@ class MinecraftModelViewer {
       (from[1] + to[1]) / 2 / 16,
       (from[2] + to[2]) / 2 / 16
     );
-
     if (element.rotation) {
       this.model.add(this._makePivot(mesh, element.rotation));
     } else {
@@ -359,17 +420,15 @@ class MinecraftModelViewer {
     }
   }
 
-  _faceMaterials(faces) {
+  _javaFaceMaterials(faces) {
     // Three.js BoxGeometry face order: +x, -x, +y, -y, +z, -z
-    // Minecraft equivalents:          east,west, up,down,south,north
+    // Minecraft Java equivalents:     east,west, up,down,south,north
     const order = ['east', 'west', 'up', 'down', 'south', 'north'];
     const iw = (this.texture.image && this.texture.image.width)  || 64;
     const ih = (this.texture.image && this.texture.image.height) || 64;
-
     return order.map(name => {
       const face = faces[name];
       if (!face) return new THREE.MeshPhongMaterial({ color: 0x888888, shininess: 0 });
-
       const tex = this.texture.clone();
       tex.needsUpdate = true;
       const uv = face.uv;
@@ -381,9 +440,7 @@ class MinecraftModelViewer {
         tex.wrapS = THREE.ClampToEdgeWrapping;
         tex.wrapT = THREE.ClampToEdgeWrapping;
       }
-      return new THREE.MeshPhongMaterial({
-        map: tex, shininess: 0, transparent: true, alphaTest: 0.1
-      });
+      return new THREE.MeshPhongMaterial({ map: tex, shininess: 0, transparent: true, alphaTest: 0.1 });
     });
   }
 
