@@ -28,7 +28,7 @@ class _HomePageState extends State<HomePage> {
   final _viewerKey = GlobalKey<MinecraftViewerState>();
 
   String _selectedModel = 'steve';
-  double _scale = 1.0;
+  double _scale = 2.0;
   double _cameraDistance = 80.0;
   bool _autoRotate = true;
   String? _statusMessage;
