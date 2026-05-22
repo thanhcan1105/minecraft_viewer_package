@@ -358,8 +358,7 @@ class MinecraftModelViewer {
       elements.forEach(el => this._addCube(el));
     }
 
-    this._centerModel();
-
+    // 1. Apply scale first (auto-scale uses raw geometry bounds before centering)
     const s = this.options.scale;
     if (s) {
       this.model.scale.set(s, s, s);
@@ -374,7 +373,10 @@ class MinecraftModelViewer {
       }
     }
 
-    // Reset camera to center on every model load
+    // 2. Center after scale so bounding box reflects final size
+    this._centerModel();
+
+    // 3. Reset camera pan to center on every model load
     this.panTargetX = 0;
     this.panTargetY = 0;
     this.camera.position.x = 0;
