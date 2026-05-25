@@ -370,6 +370,9 @@ class MinecraftModelViewer {
       elements.forEach(el => this._addCube(el));
     }
 
+    // Minecraft models face -Z (North); rotate to face camera at +Z
+    this.model.rotation.y = Math.PI;
+
     // 1. Apply scale first (auto-scale uses raw geometry bounds before centering)
     const s = this.options.scale;
     if (s) {
