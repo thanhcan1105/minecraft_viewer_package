@@ -408,16 +408,100 @@ class MinecraftModelViewer {
     const desc = geo.description || {};
     const texW = desc.texture_width || 64;
     const texH = desc.texture_height || 64;
-    (geo.bones || []).forEach(bone => {
-      (bone.cubes || []).forEach(cube => this._addBedrockCube(cube, texW, texH));
+    this._buildBoneHierarchy(geo.bones || [], texW, texH, false);
+  }
+
+  _buildLegacyBedrockModel(entityJson) {
+    const geoKey = Object.keys(entityJson).find(k => k.startsWith('geometry.'));
+    if (!geoKey) return;
+    const geo = entityJson[geoKey];
+    const texW = geo.texturewidth || 64;
+    const texH = geo.textureheight || 64;
+    this._buildBoneHierarchy(geo.bones || [], texW, texH, true);
+  }
+
+  // Shared bone-hierarchy builder for both Bedrock formats.
+  // isLegacy=true → box UV + bone.mirror; isLegacy=false → per-face UV object
+  _buildBoneHierarchy(bones, texW, texH, isLegacy) {
+    const boneByName = {};
+    const groupByName = {};
+    bones.forEach(bone => {
+      boneByName[bone.name] = bone;
+      groupByName[bone.name] = new THREE.Group();
+    });
+
+    // Populate each bone group with its cube meshes
+    bones.forEach(bone => {
+      const group = groupByName[bone.name];
+      const pivot = bone.pivot || [0, 0, 0];
+      const mirror = bone.mirror || false;
+      (bone.cubes || []).forEach(cube => {
+        const mesh = isLegacy
+          ? this._legacyCubeMesh(cube, texW, texH, mirror, pivot)
+          : this._bedrockCubeMesh(cube, texW, texH, pivot);
+        if (mesh) group.add(mesh);
+      });
+      // Static bone rotation (ZYX order matches Blockbench/Bedrock convention)
+      if (bone.rotation) {
+        group.rotation.order = 'ZYX';
+        group.rotation.x = bone.rotation[0] * Math.PI / 180;
+        group.rotation.y = bone.rotation[1] * Math.PI / 180;
+        group.rotation.z = bone.rotation[2] * Math.PI / 180;
+      }
+    });
+
+    // Wire up parent-child relationships and positions
+    bones.forEach(bone => {
+      const pivot = bone.pivot || [0, 0, 0];
+      const group = groupByName[bone.name];
+      if (bone.parent && groupByName[bone.parent]) {
+        const parentPivot = (boneByName[bone.parent] || {}).pivot || [0, 0, 0];
+        group.position.set(
+          (pivot[0] - parentPivot[0]) / 16,
+          (pivot[1] - parentPivot[1]) / 16,
+          (pivot[2] - parentPivot[2]) / 16
+        );
+        groupByName[bone.parent].add(group);
+      } else {
+        group.position.set(pivot[0] / 16, pivot[1] / 16, pivot[2] / 16);
+        this.model.add(group);
+      }
     });
   }
 
-  _addBedrockCube(cube, texW, texH) {
+  // Cube mesh for Bedrock 1.10.0 (box UV, bone.mirror)
+  _legacyCubeMesh(cube, texW, texH, mirror, bonePivot) {
+    const origin  = cube.origin  || [0, 0, 0];
+    const size    = cube.size    || [1, 1, 1];
+    const inflate = cube.inflate || 0;
+    const fw = size[0] + inflate * 2;
+    const fh = size[1] + inflate * 2;
+    const fd = size[2] + inflate * 2;
+    if (fw < 0.001 || fh < 0.001 || fd < 0.001) return null;
+
+    const geometry = new THREE.BoxGeometry(fw / 16, fh / 16, fd / 16);
+    const material = (this.texture && Array.isArray(cube.uv) && cube.uv.length === 2)
+      ? this._boxUVMaterials(cube.uv, size, texW, texH, mirror)
+      : new THREE.MeshPhongMaterial({ color: 0x7EC850, shininess: 0 });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    // Position = cube world-space center minus bone pivot
+    mesh.position.set(
+      (origin[0] + size[0] / 2 - bonePivot[0]) / 16,
+      (origin[1] + size[1] / 2 - bonePivot[1]) / 16,
+      (origin[2] + size[2] / 2 - bonePivot[2]) / 16
+    );
+    return mesh;
+  }
+
+  // Cube mesh for Bedrock 1.12.0 (per-face UV object)
+  _bedrockCubeMesh(cube, texW, texH, bonePivot) {
     const origin = cube.origin || [0, 0, 0];
     const size   = cube.size   || [1, 1, 1];
     const w = size[0] / 16, h = size[1] / 16, d = size[2] / 16;
-    if (Math.abs(w) < 0.001 || Math.abs(h) < 0.001 || Math.abs(d) < 0.001) return;
+    if (Math.abs(w) < 0.001 || Math.abs(h) < 0.001 || Math.abs(d) < 0.001) return null;
 
     const geometry = new THREE.BoxGeometry(Math.abs(w), Math.abs(h), Math.abs(d));
     const material = (this.texture && cube.uv)
@@ -428,48 +512,11 @@ class MinecraftModelViewer {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.position.set(
-      (origin[0] + size[0] / 2) / 16,
-      (origin[1] + size[1] / 2) / 16,
-      (origin[2] + size[2] / 2) / 16
+      (origin[0] + size[0] / 2 - bonePivot[0]) / 16,
+      (origin[1] + size[1] / 2 - bonePivot[1]) / 16,
+      (origin[2] + size[2] / 2 - bonePivot[2]) / 16
     );
-    this.model.add(mesh);
-  }
-
-  _buildLegacyBedrockModel(entityJson) {
-    const geoKey = Object.keys(entityJson).find(k => k.startsWith('geometry.'));
-    if (!geoKey) return;
-    const geo = entityJson[geoKey];
-    const texW = geo.texturewidth || 64;
-    const texH = geo.textureheight || 64;
-    (geo.bones || []).forEach(bone => {
-      const mirror = bone.mirror || false;
-      (bone.cubes || []).forEach(cube => this._addLegacyBedrockCube(cube, texW, texH, mirror));
-    });
-  }
-
-  _addLegacyBedrockCube(cube, texW, texH, mirror) {
-    const origin  = cube.origin  || [0, 0, 0];
-    const size    = cube.size    || [1, 1, 1];
-    const inflate = cube.inflate || 0;
-    const fw = size[0] + inflate * 2;
-    const fh = size[1] + inflate * 2;
-    const fd = size[2] + inflate * 2;
-    if (fw < 0.001 || fh < 0.001 || fd < 0.001) return;
-
-    const geometry = new THREE.BoxGeometry(fw / 16, fh / 16, fd / 16);
-    const material = (this.texture && Array.isArray(cube.uv) && cube.uv.length === 2)
-      ? this._boxUVMaterials(cube.uv, size, texW, texH, mirror)
-      : new THREE.MeshPhongMaterial({ color: 0x7EC850, shininess: 0 });
-
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.position.set(
-      (origin[0] + size[0] / 2) / 16,
-      (origin[1] + size[1] / 2) / 16,
-      (origin[2] + size[2] / 2) / 16
-    );
-    this.model.add(mesh);
+    return mesh;
   }
 
   _boxUVMaterials(uv, size, texW, texH, mirror) {
