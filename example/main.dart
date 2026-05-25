@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:minecraft_viewer/minecraft_viewer.dart';
 
@@ -33,14 +35,14 @@ class _HomePageState extends State<HomePage> {
   bool _autoRotate = true;
   String? _statusMessage;
 
-  Map<String, dynamic> get _currentModelJson {
+  String get _currentModelJson {
     switch (_selectedModel) {
       case 'creeper':
-        return MinecraftUtils.createCreeperModel().toJson();
+        return jsonEncode(MinecraftUtils.createCreeperModel().toJson());
       case 'cube':
-        return MinecraftUtils.createSimpleCube(size: 12).toJson();
+        return jsonEncode(MinecraftUtils.createSimpleCube(size: 12).toJson());
       default:
-        return MinecraftUtils.createSteveModel().toJson();
+        return jsonEncode(MinecraftUtils.createSteveModel().toJson());
     }
   }
 
